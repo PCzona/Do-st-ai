@@ -1,176 +1,50 @@
-import os
-from flask import Flask
-from threading import Thread
-
-app = Flask('')
-
-@app.route('/')
-def home():
-    return "Bot ishlayapti!"
-
-def run():
-    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
-
-def keep_alive():
-    t = Thread(target=run)
-    t.daemon = True
-    t.start()
-
-# Serverni yoqamiz
-keep_alive()
-import os
 import asyncio
-import random
 from aiogram import Bot, Dispatcher, F, types
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-import openai
+from aiogram.types import ReactionTypeEmoji
 
-# ==========================================
-# SOZLAMALAR VA TOKENLAR (GitHub Secrets'dan olinadi)
-# ==========================================
-TELEGRAM_BOT_TOKEN = os.getenv("BOT_TOKEN")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "YOUR_OPENAI_API_KEY")
+BOT_TOKEN = "YOUR_BOT_TOKEN"  # Bu yerga bot tokeningizni kiriting
 
-CHANNEL_ID = "@pczona_off"
-INSTAGRAM_URL = "https://www.instagram.com/pczona"
-YOUTUBE_URL = "https://www.youtube.com/@PCzona"
-
-# ==========================================
-# BOT VA DISPATCHER INITIALIZATION
-# ==========================================
-bot = Bot(token=TELEGRAM_BOT_TOKEN) if TELEGRAM_BOT_TOKEN else None
+bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
-openai.api_key = OPENAI_API_KEY
 
-user_timers = {}
+# Har bir foydalanuvchining oxirgi faollik vaqtini saqlash uchun
+user_tasks = {}
 
-# Reaksiyalar uchun emojilar ro'yxati
-REACTIONS = ["🔥", "❤️", "👍", "🤩", "⚡️", "🥳", "💥", "😎", "💯", "🎉"]
+async def check_inactivity(chat_id: int):
+    """ Foydalanuvchi 1 kun (86400 sek) yozmasa, o'zi birinchi bo'lib yozadi """
+    await asyncio.sleep(86400) # Sinash uchun buni 60 (1 minut) qilib ko'rsangiz bo'ladi
+    await bot.send_message(
+        chat_id, 
+        "Eee, yo'q bo'lib ketdingmi? Tirikmisan o'zi? Nimalar qilyapsan? 😄"
+    )
 
-# ==========================================
-# OBUNA TEKSHIRISH FUNKSIYASI
-# ==========================================
-async def check_sub(user_id: int) -> bool:
-    if not bot:
-        return True
-    try:
-        member = await bot.get_chat_member(chat_id=CHANNEL_ID, user_id=user_id)
-        return member.status in ["creator", "administrator", "member"]
-    except Exception as e:
-        print(f"Obuna tekshirishda xatolik: {e}")
-        return True
-
-def get_sub_keyboard():
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📢 Kanalga obuna bo'lish 🚀", url=f"https://t.me/{CHANNEL_ID.replace('@', '')}")],
-        [InlineKeyboardButton(text="📸 Instagram ✨", url=INSTAGRAM_URL)],
-        [InlineKeyboardButton(text="▶️ YouTube 🔥", url=YOUTUBE_URL)],
-        [InlineKeyboardButton(text="✅ Obunani tekshirish 🔍", callback_data="check_subscription")]
-    ])
-    return keyboard
-
-# ==========================================
-# COMMAND HANDLERS
-# ==========================================
-@dp.message(F.text == "/start")
-async def start_handler(message: types.Message):
-    user_id = message.from_user.id
-    if not await check_sub(user_id):
-        await message.answer(
-            "Salom! 👋✨ Botdan to'liq foydalanish va zo'r kayfiyat olish uchun kanalimizga obuna bo'ling! 🚀👇",
-            reply_markup=get_sub_keyboard()
-        )
-        return
-
-    await message.answer("Salom, do'stim! 🥳✨ Men juda xursandman! Menga istalgan narsani yoz, gaplashamiz! 💬🔥🎉")
-
-@dp.callback_query(F.data == "check_subscription")
-async def callback_check_sub(callback: types.CallbackQuery):
-    user_id = callback.from_user.id
-    if await check_sub(user_id):
-        await callback.message.edit_text("Uraaa! 🎉 Obuna tasdiqlandi! Endi mazza qilib gaplashamiz! 🚀💬💥")
-    else:
-        await callback.answer("Hali obuna bo'lmadingiz-ku! 😉👇 Kanalga kirib bosing!", show_alert=True)
-
-# ==========================================
-# AVTO-YAZISH MANTIGI (5 MINUTDAN KEYIN QAYTA YOZISH)
-# ==========================================
-async def auto_followup_task(chat_id: int, delay_seconds: int = 300):
-    await asyncio.sleep(delay_seconds)
-    try:
-        if bot:
-            messages = [
-                "Eeeey, jigarim! Nega yo'q bo'lib ketding? 🤔💭 Qaydasan? 🕵️‍♂️✨",
-                "Hoooy, do'stim! 😃 Nega jim bo'lib qolding? Kutyapman-ku! ⏳🔥",
-                "Qayerlarga g'oyib bo'lding? 😱 Ketdik, gurungni davom ettiramiz! 🚀💬🎉",
-                "Nega javob yo'q, do'stim? 😢 Zerikib qoldim-ku, yozvor! 🥺💬✨"
-            ]
-            await bot.send_message(chat_id=chat_id, text=random.choice(messages))
-    except Exception as e:
-        print(f"Avto-xabar yuborishda xatolik: {e}")
-
-# ==========================================
-# MAIN CHAT HANDLER (EMOJILAR VA REAKSIYA)
-# ==========================================
 @dp.message()
-async def chat_handler(message: types.Message):
-    user_id = message.from_user.id
-    
-    # 1. Obuna tekshirish
-    if not await check_sub(user_id):
-        await message.answer(
-            "Kanalimizga obuna bo'lishingiz kerak! 👇✨",
-            reply_markup=get_sub_keyboard()
-        )
-        return
+async def handle_user_messages(message: types.Message):
+    chat_id = message.chat.id
 
-    # 2. Xabarga avtomatik emotsional reaksiya (Stiker/Emoji) qoldirish
+    # 1. Eski eslatma taymerini bekor qilish va yangisini o'rnatish
+    if chat_id in user_tasks:
+        user_tasks[chat_id].cancel()
+    user_tasks[chat_id] = asyncio.create_task(check_inactivity(chat_id))
+
+    # 2. Xabarga avtomatik reaksiyalar bosish
     try:
-        chosen_reaction = random.choice(REACTIONS)
-        await message.react([types.ReactionTypeEmoji(emoji=chosen_reaction)])
+        await message.react([
+            ReactionTypeEmoji(emoji="👍"),
+            ReactionTypeEmoji(emoji="❤️"),
+            ReactionTypeEmoji(emoji="🔥"),
+            ReactionTypeEmoji(emoji="🎉")
+        ])
     except Exception as e:
-        print(f"Reaksiya qo'yishda xatolik: {e}")
+        print(f"Reaksiya xatoligi: {e}")
 
-    # 3. Oldingi taymerni bekor qilish
-    if user_id in user_timers:
-        user_timers[user_id].cancel()
+    # 3. Foydalanuvchi xabariga mos ravishda do'stona javob qaytarish
+    text = message.text.lower() if message.text else ""
 
-    # 4. Sun'iy intellekt orqali emojilarga boy javob qaytarish
-    user_text = message.text
-    try:
-        if OPENAI_API_KEY and OPENAI_API_KEY != "YOUR_OPENAI_API_KEY":
-            response = openai.ChatCompletion.create(
-                model="gpt-3.5-turbo",
-                messages=[
-                    {
-                        "role": "system", 
-                        "content": "Siz judayam emotsional, quvnoq, xushchaqchaq va do'stona AI yordamchisiz. Har bir javobingizda ko'plab mos emojilar (🔥, 🎉, 🤩, 🚀, ❤️, 😂, ✨ va h.k.) va stiker kayfiyatini beruvchi so'zlardan foydalaning!"
-                    },
-                    {"role": "user", "content": user_text}
-                ]
-            )
-            reply_text = response.choices[0].message.content
-        else:
-            reply_text = f"Vauuu! 🤩 '{user_text}' dedingmi?! Zaybal/Zo'r gap bo'ldi-ku! 🔥 Hali yana ko'p gaplashamiz! 🚀💬🎉"
-    except Exception as e:
-        reply_text = f"Ajoyib xabar uchun rahmat! 🥳 Yana nimalar haqida gaplashamiz, do'stim? ✨💬🔥"
-
-    await message.answer(reply_text)
-
-    # 5. 5 daqiqa (300 soniya) dan keyin avto-yozish taymerini yoqish
-    timer_task = asyncio.create_task(auto_followup_task(chat_id=message.chat.id, delay_seconds=300))
-    user_timers[user_id] = timer_task
-
-# ==========================================
-# ASOSIY ISHGA TUSHIRISH
-# ==========================================
-async def main():
-    if not TELEGRAM_BOT_TOKEN:
-        print("XATOLIK: BOT_TOKEN topilmadi!")
-        return
-    
-    print("Bot emojilar va vaqt taymeri bilan muvaffaqiyatli ishga tushdi... 🚀🔥")
-    await dp.start_polling(bot)
-
-if __name__ == "__main__":
-    asyncio.run(main())
+    if "salom" in text:
+        await message.reply("Salom! Ishlaring yaxshimi? Nimalar bilan bandsan?")
+    elif "yaxshimi" in text or "qalaysan" in text:
+        await message.reply("Zo'r, rahmat! O'zingda nima gaplar?")
+    else:
+        # Boshqa har qanday gapga do'stona javob
+        await message.reply(f"Tushundim! Siz dedingiz: '{message.text}'. Yana nimalar haqida gaplashamiz?")
